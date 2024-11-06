@@ -1,16 +1,76 @@
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy_serializer import SerializerMixin
+#!/usr/bin/env python3
 
-db = SQLAlchemy()
+from flask import Flask, jsonify, request, make_response
+from flask_migrate import Migrate
+from flask_restful import Api, Resource
 
-class Plant(db.Model, SerializerMixin):
-    __tablename__ = 'plants'
+from models import db, Plant
 
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    image = db.Column(db.String)
-    price = db.Column(db.Float)
-    is_in_stock = db.Column(db.Boolean)
+app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///plants.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.json.compact = False
 
-    def __repr__(self):
-        return f'<Plant {self.name} | In Stock: {self.is_in_stock}>'
+migrate = Migrate(app, db)
+db.init_app(app)
+
+api = Api(app)
+
+
+class Plants(Resource):
+
+    def get(self):
+        plants = [plant.to_dict() for plant in Plant.query.all()]
+        return make_response(jsonify(plants), 200)
+
+    def post(self):
+        data = request.get_json()
+
+        new_plant = Plant(
+            name=data["name"],
+            image=data["image"],
+            price=data["price"],
+        )
+
+        db.session.add(new_plant)
+        db.session.commit()
+
+        return make_response(new_plant.to_dict(), 201)
+
+
+api.add_resource(Plants, "/plants")
+
+
+class PlantByID(Resource):
+
+    def get(self, id):
+        if plant := Plant.query.filter_by(id=id).first():
+            return make_response(plant.to_dict(), 200)
+        else:
+            return make_response({"message": "Plant record not found"}, 404)
+
+    def patch(self, id):
+        data = request.get_json() if request.is_json else request.form
+        plant = Plant.query.filter_by(id=id).first()
+        if plant:
+            for key, value in data.items():
+                setattr(plant, key, value)
+                db.session.commit()
+            response = make_response(plant.to_dict(), 200)
+        else:
+            response = make_response({"message": "Plant record not found"}, 404)
+        return response
+
+    def delete(self, id):
+        plant = Plant.query.filter_by(id=id).first()
+        db.session.delete(plant)
+        db.session.commit()
+        response = ""
+        return make_response(response, 204)
+
+
+api.add_resource(PlantByID, "/plants/<int:id>")
+
+
+if __name__ == "__main__":
+    app.run(port=5555, debug=True)
